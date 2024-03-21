@@ -23,6 +23,8 @@
 #include "fs/DirectoryReader.hxx"
 #include "input/InputStream.hxx"
 #include "input/Error.hxx"
+#include "queue/Playlist.hxx"
+#include "song/DetachedSong.hxx"
 #include "LocateUri.hxx"
 #include "TimePrint.hxx"
 #include "thread/Mutex.hxx"
@@ -33,6 +35,7 @@
 #include <algorithm>
 #include <cassert>
 #include <array>
+
 
 [[gnu::pure]]
 static bool
@@ -207,6 +210,78 @@ read_stream_art(Response &r, const std::string_view art_directory,
 	return CommandResult::OK;
 }
 
+/* lyrics file = relative path + file name */
+static InputStreamPtr
+find_stream_lyrics(std::string_view lyrics_file, Mutex &mutex) 
+{
+	std::string lrc_file = PathTraitsUTF8::string(lyrics_file);
+
+	try {
+		return InputStream::OpenReady(lrc_file.c_str(), mutex);
+	} catch (...) {
+		auto e = std::current_exception();
+		if (!IsFileNotFound(e))
+			LogError(e);
+	}
+	
+	return nullptr;
+}
+
+
+
+
+static CommandResult
+read_stream_lyrics(Response &r, std::string_view format,
+		size_t offset)
+{
+	// TODO: eliminate this const_cast
+	auto &client = const_cast<Client &>(r.GetClient());
+
+	/* to avoid repeating the search for each chunk request by the
+	   same client, use the #LastInputStream class to cache the
+	   #InputStream instance */
+	auto *is = client.last_album_art.Open(format, [](std::string_view lrcf, Mutex &mutex 
+	){
+		return find_stream_lyrics(lrcf, mutex);
+	});
+
+	if (is == nullptr) {
+		r.Error(ACK_ERROR_NO_EXIST, "No file exists");
+		return CommandResult::ERROR;
+	}
+	if (!is->KnownSize()) {
+		r.Error(ACK_ERROR_NO_EXIST, "Cannot get size for stream");
+		return CommandResult::ERROR;
+	}
+
+	const offset_type art_file_size = is->GetSize();
+
+	if (offset > art_file_size) {
+		r.Error(ACK_ERROR_ARG, "Offset too large");
+		return CommandResult::ERROR;
+	}
+
+	std::size_t buffer_size =
+		std::min<offset_type>(art_file_size - offset,
+				      r.GetClient().binary_limit);
+
+	auto buffer = std::make_unique<std::byte[]>(buffer_size);
+
+	std::size_t read_size = 0;
+	if (buffer_size > 0) {
+		std::unique_lock<Mutex> lock(is->mutex);
+		is->Seek(lock, offset);
+		read_size = is->Read(lock, buffer.get(), buffer_size);
+	}
+
+	r.Fmt(FMT_STRING("size: {}\n"), art_file_size);
+
+	r.WriteBinary({buffer.get(), read_size});
+
+	return CommandResult::OK;
+}
+
+
 #ifdef ENABLE_DATABASE
 
 /**
@@ -263,6 +338,26 @@ read_db_art(Client &client, Response &r, const char *uri, const uint64_t offset)
 
 	return read_stream_art(r, directory_uri, offset);
 }
+
+static CommandResult
+read_db_lyrics(Client &client, Response &r, const char *uri, const uint64_t offset)
+{
+	const Storage *storage = client.GetStorage();
+	if (storage == nullptr) {
+		r.Error(ACK_ERROR_NO_EXIST, "No database");
+		return CommandResult::ERROR;
+	}
+	std::string uri2 = storage->MapUTF8(uri);
+
+	std::string_view directory_uri =
+		RealDirectoryOfSong(client,
+				    uri,
+				    PathTraitsUTF8::GetParent(uri2.c_str()));
+
+	return read_stream_lyrics(r, directory_uri, offset);
+}
+
+
 #endif
 
 CommandResult
@@ -358,3 +453,44 @@ handle_read_picture(Client &client, Request args, Response &r)
 	handler.RethrowError();
 	return CommandResult::OK;
 }
+
+
+
+
+
+CommandResult
+handle_lyrics(Client &client, Request args, Response &r)
+{
+	assert(args.size() == 2);
+
+	const char *uri = args.front();
+	size_t offset = args.ParseUnsigned(1);
+
+	const auto located_uri = LocateUri(UriPluginKind::INPUT, uri, &client
+#ifdef ENABLE_DATABASE
+					   , nullptr
+#endif
+					   );
+
+	switch (located_uri.type) {
+	case LocatedUri::Type::ABSOLUTE:
+	case LocatedUri::Type::PATH:
+		return read_stream_lyrics(r,
+				       PathTraitsUTF8::GetParent(located_uri.canonical_uri),
+				       offset);
+
+	case LocatedUri::Type::RELATIVE:
+#ifdef ENABLE_DATABASE
+		return read_db_lyrics(client, r, located_uri.canonical_uri, offset);
+#else
+		r.Error(ACK_ERROR_NO_EXIST, "Database disabled");
+		return CommandResult::ERROR;
+#endif
+	}
+	r.Error(ACK_ERROR_NO_EXIST, "No such lyrics file exists");
+	return CommandResult::ERROR;
+	
+}
+
+
+

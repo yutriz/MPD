@@ -122,6 +122,7 @@ static constexpr struct command commands[] = {
 	{ "listplaylists", PERMISSION_READ, 0, 0, handle_listplaylists },
 	{ "load", PERMISSION_ADD, 1, 3, handle_load },
 	{ "lsinfo", PERMISSION_READ, 0, 1, handle_lsinfo },
+	{ "lyrics", PERMISSION_READ, 2, 2, handle_lyrics },
 	{ "mixrampdb", PERMISSION_PLAYER, 1, 1, handle_mixrampdb },
 	{ "mixrampdelay", PERMISSION_PLAYER, 1, 1, handle_mixrampdelay },
 #ifdef ENABLE_DATABASE
@@ -202,6 +203,7 @@ static constexpr struct command commands[] = {
 	{ "update", PERMISSION_CONTROL, 0, 1, handle_update },
 	{ "urlhandlers", PERMISSION_READ, 0, 0, handle_urlhandlers },
 	{ "volume", PERMISSION_PLAYER, 1, 1, handle_volume },
+	
 };
 
 static constexpr unsigned num_commands = std::size(commands);

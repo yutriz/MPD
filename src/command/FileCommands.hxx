@@ -11,6 +11,10 @@ class Request;
 class Response;
 class Path;
 
+class DetachedSong;
+struct playlist;
+class Client;
+
 CommandResult
 handle_listfiles_local(Response &response, Path path_fs);
 
@@ -19,6 +23,9 @@ handle_read_comments(Client &client, Request request, Response &response);
 
 CommandResult
 handle_album_art(Client &client, Request request, Response &response);
+
+CommandResult
+handle_lyrics(Client &client, Request request, Response &response);
 
 CommandResult
 handle_read_picture(Client &client, Request request, Response &response);
