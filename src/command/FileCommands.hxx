@@ -11,9 +11,6 @@ class Request;
 class Response;
 class Path;
 
-class DetachedSong;
-struct playlist;
-class Client;
 
 CommandResult
 handle_listfiles_local(Response &response, Path path_fs);

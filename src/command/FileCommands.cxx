@@ -36,6 +36,9 @@
 #include <cassert>
 #include <array>
 
+/*test*/
+#include <iostream>
+
 
 [[gnu::pure]]
 static bool
@@ -214,7 +217,7 @@ read_stream_art(Response &r, const std::string_view art_directory,
 static InputStreamPtr
 find_stream_lyrics(std::string_view lyrics_file, Mutex &mutex) 
 {
-	std::string lrc_file = PathTraitsUTF8::string(lyrics_file);
+	std::string lrc_file = std::string(lyrics_file);
 
 	try {
 		return InputStream::OpenReady(lrc_file.c_str(), mutex);
@@ -231,7 +234,7 @@ find_stream_lyrics(std::string_view lyrics_file, Mutex &mutex)
 
 
 static CommandResult
-read_stream_lyrics(Response &r, std::string_view format,
+read_stream_lyrics(Response &r, const std::string_view lrc_file,
 		size_t offset)
 {
 	// TODO: eliminate this const_cast
@@ -240,7 +243,7 @@ read_stream_lyrics(Response &r, std::string_view format,
 	/* to avoid repeating the search for each chunk request by the
 	   same client, use the #LastInputStream class to cache the
 	   #InputStream instance */
-	auto *is = client.last_album_art.Open(format, [](std::string_view lrcf, Mutex &mutex 
+	auto *is = client.last_album_art.Open(lrc_file, [](std::string_view lrcf, Mutex &mutex 
 	){
 		return find_stream_lyrics(lrcf, mutex);
 	});
@@ -254,15 +257,15 @@ read_stream_lyrics(Response &r, std::string_view format,
 		return CommandResult::ERROR;
 	}
 
-	const offset_type art_file_size = is->GetSize();
+	const offset_type lrc_file_size = is->GetSize();
 
-	if (offset > art_file_size) {
+	if (offset > lrc_file_size) {
 		r.Error(ACK_ERROR_ARG, "Offset too large");
 		return CommandResult::ERROR;
 	}
 
 	std::size_t buffer_size =
-		std::min<offset_type>(art_file_size - offset,
+		std::min<offset_type>(lrc_file_size - offset,
 				      r.GetClient().binary_limit);
 
 	auto buffer = std::make_unique<std::byte[]>(buffer_size);
@@ -274,7 +277,7 @@ read_stream_lyrics(Response &r, std::string_view format,
 		read_size = is->Read(lock, buffer.get(), buffer_size);
 	}
 
-	r.Fmt(FMT_STRING("size: {}\n"), art_file_size);
+	r.Fmt(FMT_STRING("size: {}\n"), lrc_file_size);
 
 	r.WriteBinary({buffer.get(), read_size});
 
@@ -349,12 +352,8 @@ read_db_lyrics(Client &client, Response &r, const char *uri, const uint64_t offs
 	}
 	std::string uri2 = storage->MapUTF8(uri);
 
-	std::string_view directory_uri =
-		RealDirectoryOfSong(client,
-				    uri,
-				    PathTraitsUTF8::GetParent(uri2.c_str()));
 
-	return read_stream_lyrics(r, directory_uri, offset);
+	return read_stream_lyrics(r, uri2, offset);
 }
 
 
